@@ -5,10 +5,14 @@
 
 The ``pysvdgen`` command runs the four stages of the generator in order:
 
-1. the device tree of the SoC is parsed and turned into a CMSIS-SVD skeleton;
+1. the device tree of the SoC is parsed and turned into a CMSIS-SVD skeleton,
+   or an existing SVD file is taken as the starting point;
 2. the reference manual is split into one document per chapter;
 3. the register tables of the selected chapters are extracted;
 4. the registers and bit fields are injected into the SVD file.
+
+Starting from an existing SVD, with ``--svd``, completes it chapter after
+chapter: the peripherals already documented are left untouched.
 
 Every message is rendered with :mod:`rich`. Anything the pipeline could not
 resolve, peripherals missing on either side and registers landing outside the
@@ -54,14 +58,17 @@ EXIT_SUCCESS = 0
 EXIT_FAILURE = 1
 #: Returned when no chapter matches the requested selection.
 EXIT_NO_CHAPTER = 2
+#: Returned when the arguments are inconsistent.
+EXIT_USAGE = 3
 
 
 @dataclass
 class Options:
     """Resolved command line options.
 
-    :param kernel: root of the Linux kernel sources.
-    :param dtsi: DTSI name, without extension.
+    :param kernel: root of the Linux kernel sources, None with ``svd``.
+    :param dtsi: DTSI name without extension, None with ``svd``.
+    :param svd: existing SVD file to complete, None when generating one.
     :param pdf: reference manual to read.
     :param output: SVD file to write.
     :param workspace: working directory kept on exit, None for a temporary one.
@@ -73,8 +80,9 @@ class Options:
     :param verbose: show the module logs.
     """
 
-    kernel: Path
-    dtsi: str
+    kernel: Path | None
+    dtsi: str | None
+    svd: Path | None
     pdf: Path
     output: Path
     workspace: Path | None
@@ -91,8 +99,9 @@ class Options:
         return cls(
             kernel=args.kernel,
             dtsi=args.dtsi,
+            svd=args.svd,
             pdf=args.pdf,
-            output=args.output,
+            output=args.output or args.svd,
             workspace=args.workspace,
             chapters=args.chapters,
             model=args.model,
@@ -109,14 +118,26 @@ def build_parser() -> argparse.ArgumentParser:
         prog="pysvdgen",
         description=(
             "Generate a CMSIS-SVD file from the Linux device tree of a SoC and "
-            "enrich it with the register tables of its reference manual. The "
+            "enrich it with the register tables of its reference manual, or "
+            "complete an existing SVD file chapter after chapter. The "
             "extraction queries a local ollama server unless --no-llm is given."
         ),
     )
-    parser.add_argument("-k", "--kernel", required=True, type=Path, help="Linux kernel sources")
-    parser.add_argument("-d", "--dtsi", required=True, help="DTSI name, without extension")
+    parser.add_argument("-k", "--kernel", type=Path, help="Linux kernel sources")
+    parser.add_argument("-d", "--dtsi", help="DTSI name, without extension")
+    parser.add_argument(
+        "-s",
+        "--svd",
+        type=Path,
+        help="existing SVD file to complete, instead of generating one from --kernel/--dtsi",
+    )
     parser.add_argument("-p", "--pdf", required=True, type=Path, help="reference manual PDF")
-    parser.add_argument("-o", "--output", required=True, type=Path, help="SVD file to write")
+    parser.add_argument(
+        "-o",
+        "--output",
+        type=Path,
+        help="SVD file to write, required unless --svd is given and updated in place",
+    )
     parser.add_argument(
         "-w",
         "--workspace",
@@ -278,13 +299,34 @@ def _extract(
     return dictionaries
 
 
+def _check(parser: argparse.ArgumentParser, args: argparse.Namespace) -> None:
+    """Reject the argument combinations the pipeline cannot honour."""
+    if args.svd:
+        if args.kernel or args.dtsi:
+            parser.error("--svd cannot be combined with --kernel or --dtsi")
+    elif not (args.kernel and args.dtsi):
+        parser.error("--kernel and --dtsi are required, unless --svd is given")
+    if not args.output and not args.svd:
+        parser.error("--output is required, unless --svd is updated in place")
+
+
 def run(argv: Sequence[str] | None = None) -> int:
     """Run the complete pipeline.
 
+    Either ``--kernel``/``--dtsi`` generate the SVD skeleton from the device
+    tree, or ``--svd`` completes an existing file.
+
     :param argv: command line arguments, :data:`sys.argv` when omitted.
-    :return: 0 on success, 2 when no chapter matches the selection, 1 on error.
+    :return: 0 on success, 2 when no chapter matches the selection, 3 on a
+        usage error, 1 on any other error.
     """
-    options = Options.from_namespace(build_parser().parse_args(argv))
+    parser = build_parser()
+    args = parser.parse_args(argv)
+    try:
+        _check(parser, args)
+    except SystemExit:
+        return EXIT_USAGE
+    options = Options.from_namespace(args)
     console = Console()
     logging.basicConfig(
         level=logging.INFO if options.verbose else logging.ERROR,
@@ -292,10 +334,12 @@ def run(argv: Sequence[str] | None = None) -> int:
         handlers=[RichHandler(console=console, show_path=False, rich_tracebacks=True)],
     )
 
+    origin = f"kernel : {options.kernel}" if options.svd is None else f"svd    : {options.svd}"
+    label = options.dtsi if options.svd is None else options.svd.name
     console.print(
         Panel.fit(
-            f"[bold]{options.dtsi}[/bold]\n"
-            f"kernel : {options.kernel}\n"
+            f"[bold]{label}[/bold]\n"
+            f"{origin}\n"
             f"manual : {options.pdf}\n"
             f"output : {options.output}\n"
             f"model  : {options.model if options.use_llm else 'disabled (--no-llm)'}",
@@ -306,14 +350,21 @@ def run(argv: Sequence[str] | None = None) -> int:
 
     try:
         with _workspace(options.workspace, console) as workspace:
-            console.rule("[bold]1/4 Device tree to SVD")
-            svd = generate_svd(
-                options.kernel,
-                options.dtsi,
-                workspace / f"{options.dtsi}.svd",
-                vendor=options.vendor,
-            )
-            console.print(f"Intermediate SVD: [green]{svd}[/green]")
+            if options.svd is not None:
+                console.rule("[bold]1/4 Existing SVD")
+                svd = options.svd
+                if not svd.is_file():
+                    raise FileNotFoundError(f"No such SVD file: {svd}")
+                console.print(f"Completing: [green]{svd}[/green]")
+            else:
+                console.rule("[bold]1/4 Device tree to SVD")
+                svd = generate_svd(
+                    options.kernel or Path(),
+                    options.dtsi or "",
+                    workspace / f"{options.dtsi}.svd",
+                    vendor=options.vendor,
+                )
+                console.print(f"Intermediate SVD: [green]{svd}[/green]")
 
             console.rule("[bold]2/4 Reference manual splitting")
             chapters = _selected(list_chapters(options.pdf), options.chapters)

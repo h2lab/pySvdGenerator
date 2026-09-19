@@ -313,6 +313,10 @@ def enrich_svd(
         dictionaries, or the path of a JSON file or directory holding them.
     :param output: destination file, defaults to updating ``svd`` in place.
     :return: a report describing what has been merged.
+
+    Peripherals already holding a ``<registers>`` section and not covered by
+    the given dictionaries are left untouched and are not reported as
+    unmatched, so an SVD file can be completed one chapter at a time.
     """
     source_path = Path(svd)
     if not source_path.is_file():
@@ -328,14 +332,16 @@ def enrich_svd(
     report = EnrichmentReport(output=Path(output) if output else source_path)
     for peripheral in peripherals:
         candidate = pairs.get(id(peripheral))
+        documented = peripheral.find("registers") is not None
         if candidate is None:
-            report.unmatched_svd.append(_text(peripheral.find("name")))
+            if not documented:
+                report.unmatched_svd.append(_text(peripheral.find("name")))
             continue
         used.add(candidate.key)
         match = _enrich_peripheral(peripheral, candidate)
         if match.registers:
             report.matches.append(match)
-        else:
+        elif not documented:
             report.unmatched_svd.append(match.peripheral)
 
     report.unused_sources = [item.name for item in sources if item.key not in used]
