@@ -68,6 +68,7 @@ class Options:
     :param chapters: chapter name filters, empty for the whole manual.
     :param model: ollama model used by the extraction agent.
     :param host: base URL of the ollama server, None for the default one.
+    :param use_llm: query the ollama agent, enabled by default.
     :param vendor: vendor name written in the SVD.
     :param verbose: show the module logs.
     """
@@ -80,6 +81,7 @@ class Options:
     chapters: list[str]
     model: str
     host: str | None
+    use_llm: bool
     vendor: str | None
     verbose: bool
 
@@ -95,6 +97,7 @@ class Options:
             chapters=args.chapters,
             model=args.model,
             host=args.ollama_host,
+            use_llm=not args.no_llm,
             vendor=args.vendor,
             verbose=args.verbose,
         )
@@ -106,8 +109,8 @@ def build_parser() -> argparse.ArgumentParser:
         prog="pysvdgen",
         description=(
             "Generate a CMSIS-SVD file from the Linux device tree of a SoC and "
-            "enrich it with the register tables of its reference manual. A "
-            "local ollama server is required by the extraction stage."
+            "enrich it with the register tables of its reference manual. The "
+            "extraction queries a local ollama server unless --no-llm is given."
         ),
     )
     parser.add_argument("-k", "--kernel", required=True, type=Path, help="Linux kernel sources")
@@ -132,6 +135,11 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--model", default=DEFAULT_MODEL, help="ollama model used for extraction")
     parser.add_argument("--ollama-host", default=None, help="base URL of the ollama server")
+    parser.add_argument(
+        "--no-llm",
+        action="store_true",
+        help="do not query the ollama agent, the extraction is then degraded",
+    )
     parser.add_argument("--vendor", default=None, help="vendor name written in the SVD")
     parser.add_argument("-v", "--verbose", action="store_true", help="show module logs")
     return parser
@@ -259,7 +267,9 @@ def _extract(
             if target.is_file():
                 dictionaries.append(json.loads(target.read_text()))
             else:
-                data = extract_registers(path, model=options.model, host=options.host)
+                data = extract_registers(
+                    path, model=options.model, host=options.host, use_llm=options.use_llm
+                )
                 target.write_text(json.dumps(data, indent=1))
                 dictionaries.append(data)
             progress.advance(task)
@@ -288,7 +298,7 @@ def run(argv: Sequence[str] | None = None) -> int:
             f"kernel : {options.kernel}\n"
             f"manual : {options.pdf}\n"
             f"output : {options.output}\n"
-            f"model  : {options.model}",
+            f"model  : {options.model if options.use_llm else 'disabled (--no-llm)'}",
             title="pySvdGenerator",
             border_style="cyan",
         )

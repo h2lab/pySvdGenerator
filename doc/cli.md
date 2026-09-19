@@ -8,6 +8,8 @@ SPDX-License-Identifier: Apache-2.0
 The `pysvdgen` command, chaining the four stages of the generator. The entry
 point is `pySvdGenerator.cli:run`, declared in `pyproject.toml`.
 
+The extraction queries a local ollama server unless `--no-llm` is given.
+
 ## Usage
 
 ```console
@@ -24,6 +26,7 @@ pysvdgen -k /src/linux -d imx8mm -p IMX8MDQLQRM.pdf -o imx8mm.svd
 | `-c`, `--chapter` | only process the chapters whose name contains this text, repeatable |
 | `--model` | ollama model used for extraction, default `qwen2.5-coder:7b`, falling back to `llama3.2` |
 | `--ollama-host` | base URL of the ollama server, default `http://localhost:11434` |
+| `--no-llm` | do not query the agent, the extraction is then degraded |
 | `--vendor` | vendor name written in the SVD |
 | `-v`, `--verbose` | show the module logs and the tracebacks |
 

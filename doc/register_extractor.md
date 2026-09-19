@@ -14,7 +14,7 @@ consolidated by a local `ollama` agent.
 | Symbol | Description |
 | --- | --- |
 | `extract_registers(pdf, **kwargs)` | Extract a chapter and return the plain dictionary |
-| `extract_peripherals(pdf, *, peripheral=None, pages=None, model=DEFAULT_MODEL, host=None, assistant=None, batch_size=BATCH_SIZE)` | Same work, returning the `ChapterRegisters` model |
+| `extract_peripherals(pdf, *, peripheral=None, pages=None, model=DEFAULT_MODEL, host=None, use_llm=True, assistant=None, batch_size=BATCH_SIZE)` | Same work, returning the `ChapterRegisters` model |
 | `ChapterRegisters`, `PeripheralRegisters`, `Register`, `Field` | Data model |
 | `OllamaAssistant` | The consolidation agent |
 | `OllamaUnavailableError` | Raised when the ollama server cannot be reached |
@@ -48,9 +48,11 @@ consolidated by a local `ollama` agent.
 
 ## The ollama agent
 
-The agent is a required part of the extraction. `OllamaAssistant` pings the
-server at construction and raises `OllamaUnavailableError` when it does not
-answer. Every request is made at temperature 0 with a JSON response format.
+The agent is used by default. `OllamaAssistant` pings the server at
+construction and raises `OllamaUnavailableError` when it does not answer.
+Every request is made at temperature 0 with a JSON response format. Passing
+`use_llm=False` skips stages 3, 6, 7 and 8 whenever the deterministic parsing
+did not conclude, and needs no server.
 
 The model is resolved at construction against the models pulled on the
 server: the one asked for when it is there, otherwise the first available

@@ -25,7 +25,8 @@ reference manual (registers and bit fields).
    maps and the bit field tables with `tabula-py`, merges the tables continued
    over several pages, separates the peripheral instances (`GPT1`, `GPT2`, ...)
    and returns a dictionary. A local `ollama` agent consolidates the result
-   and is required by this stage.
+   and is queried by default; `--no-llm` (`use_llm=False`) restricts the stage
+   to the deterministic parsing.
 5. **SVD enrichment** — `enrich_svd()` injects the registers and fields into
    the SVD, keeping only the registers that fall inside the address blocks
    declared by the device tree `reg` property.
@@ -47,6 +48,7 @@ pysvdgen -k /path/to/linux -d imx8mm -p IMX8MDQLQRM.pdf -o imx8mm.svd
 | `-w`, `--workspace` | working directory, kept on exit; a temporary one is created and removed when omitted |
 | `-c`, `--chapter` | only process the chapters whose name contains this text (repeatable) |
 | `--model`, `--ollama-host` | select the ollama model and server |
+| `--no-llm` | do not query the agent, the extraction is then degraded |
 | `--vendor`, `-v` | vendor name written in the SVD, verbose logs |
 
 Peripherals missing from the device tree, peripherals missing from the manual
@@ -78,11 +80,13 @@ sudo apt install default-jre
 
 ### ollama
 
-The extraction stage needs a reachable `ollama` server. The agent classifies
-the tables the header heuristics cannot recognise, attributes the orphan bit
-field tables, splits the register names of the peripheral instances and
-repairs the field names damaged by the PDF text extraction.
-`OllamaUnavailableError` is raised when the server does not answer.
+The extraction stage queries a reachable `ollama` server by default. The
+agent classifies the tables the header heuristics cannot recognise,
+attributes the orphan bit field tables, splits the register names of the
+peripheral instances and repairs the field names damaged by the PDF text
+extraction. `OllamaUnavailableError` is raised when the server does not
+answer. Use `--no-llm` to run without any server, at the price of a degraded
+extraction.
 
 Install the server, start it and pull a model:
 

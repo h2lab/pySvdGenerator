@@ -34,4 +34,4 @@ only what both descriptions agree on and reports the rest.
 
 * a Java runtime, used by `tabula-py`;
 * a reachable `ollama` server holding `qwen2.5-coder:7b`, or `llama3.2` as a
-  fallback, required by the extraction stage.
+  fallback, queried by the extraction stage unless `--no-llm` is given.

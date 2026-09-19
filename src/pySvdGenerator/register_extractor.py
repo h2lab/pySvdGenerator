@@ -16,12 +16,13 @@ The extraction is strictly sequential:
    usually covering every instance of the block (``GPT1``, ``GPT2``, ...);
 6. the local `ollama` agent consolidates the result.
 
-The agent is a required part of the extraction, not an optional extra. It
-classifies the tables the header heuristics could not recognise, decides
-which register an orphan field table documents, splits register names whose
-instance is not exposed by the mnemonic and repairs field names degraded by
-the PDF text extraction. A reachable ollama server is therefore mandatory;
-:class:`OllamaUnavailableError` is raised when it cannot be contacted.
+The agent is used by default. It classifies the tables the header heuristics
+could not recognise, decides which register an orphan field table documents,
+splits register names whose instance is not exposed by the mnemonic and
+repairs field names degraded by the PDF text extraction. A reachable ollama
+server is therefore needed and :class:`OllamaUnavailableError` is raised when
+it cannot be contacted. Passing ``use_llm=False`` runs the deterministic
+parsing alone, which needs no server but gives a degraded result.
 
 Typical use:
 
@@ -782,7 +783,7 @@ def _split_instance(name: str) -> tuple[str, str] | None:
 def _group_by_instance(
     registers: Iterable[Register],
     fallback: str,
-    assistant: OllamaAssistant,
+    assistant: OllamaAssistant | None,
 ) -> list[PeripheralRegisters]:
     """Split a flat register list into one entry per peripheral instance."""
     items = list(registers)
@@ -795,7 +796,7 @@ def _group_by_instance(
         else:
             unresolved.append(register.name)
 
-    if unresolved:
+    if unresolved and assistant is not None:
         resolved.update(assistant.split_instances(unresolved, fallback))
 
     groups: dict[str, PeripheralRegisters] = {}
@@ -875,6 +876,7 @@ def extract_peripherals(
     pages: Sequence[int] | None = None,
     model: str = DEFAULT_MODEL,
     host: str | None = None,
+    use_llm: bool = True,
     assistant: OllamaAssistant | None = None,
     batch_size: int = BATCH_SIZE,
 ) -> ChapterRegisters:
@@ -887,18 +889,23 @@ def extract_peripherals(
     :param pages: 1 based page numbers to read, the whole document by default.
     :param model: ollama model used by the consolidation agent.
     :param host: base URL of the ollama server.
+    :param use_llm: query the agent, enabled by default; when disabled only
+        the deterministic parsing is used and the result is degraded.
     :param assistant: already built agent, created from ``model`` and ``host``
         when omitted.
     :param batch_size: number of pages read by a single tabula call.
     :return: the peripheral instances described by the chapter.
     :raises FileNotFoundError: if ``pdf`` does not exist.
-    :raises OllamaUnavailableError: if the ollama server cannot be reached.
+    :raises OllamaUnavailableError: if the agent is used and the ollama server
+        cannot be reached.
     """
     source = Path(pdf)
     if not source.is_file():
         raise FileNotFoundError(f"No such document: {source}")
 
-    agent = assistant if assistant is not None else OllamaAssistant(model, host)
+    agent = assistant
+    if agent is None and use_llm:
+        agent = OllamaAssistant(model, host)
 
     reader = PdfReader(str(source))
     page_numbers = list(pages) if pages else list(range(1, len(reader.pages) + 1))
@@ -909,9 +916,10 @@ def extract_peripherals(
     for table in tables:
         _split_header(table)
 
-    for table in tables:
-        if table.kind == UNKNOWN and table.frame.shape[1] >= 2:
-            table.kind = agent.classify(table)
+    if agent is not None:
+        for table in tables:
+            if table.kind == UNKNOWN and table.frame.shape[1] >= 2:
+                table.kind = agent.classify(table)
 
     tables = _merge(tables)
 
@@ -925,7 +933,7 @@ def extract_peripherals(
         if not fields:
             continue
         owners = _owners(table, texts, registers)
-        if not owners:
+        if not owners and agent is not None:
             answer = agent.owner(table, texts.get(table.page, ""), list(registers))
             owners = [answer] if answer else []
         for owner in owners:
@@ -933,7 +941,8 @@ def extract_peripherals(
 
     name = peripheral or _peripheral_name(source, texts, page_numbers)
     grouped = _group_by_instance(registers.values(), name, agent)
-    _consolidate(grouped, agent)
+    if agent is not None:
+        _consolidate(grouped, agent)
     return ChapterRegisters(source=str(source), peripherals=grouped)
 
 
