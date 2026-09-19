@@ -1,0 +1,78 @@
+# SPDX-FileCopyrightText: 2026 H2Lab Development Team
+#
+# SPDX-License-Identifier: Apache-2.0
+
+[build-system]
+requires = ["setuptools>=80", "setuptools_scm>=9"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "pySvdGenerator"
+description = "A Python module for generating SVD files"
+dynamic = ["version"]
+requires-python = ">= 3.12"
+readme = "README.md"
+authors = [
+  {name = "Florent Valette"},
+  {name = "Philippe Thierry"},
+]
+license = {file = "LICENSES/Apache-2.0.txt"}
+dependencies = [
+    "pypdf>=5",
+    "tabula-py>=2.9",
+    "pandas>=2",
+    "ollama>=0.3",
+    "rich>=13",
+]
+classifiers = [
+    "Development Status :: 1 - Planning",
+
+    "Intended Audience :: Developers",
+
+    "Topic :: Software Development :: Code Generators",
+
+    "License :: OSI Approved :: Apache Software License",
+
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3 :: Only",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
+]
+
+[project.urls]
+Homepage = "https://github.com/h2lab"
+Repository = "https://github.com/h2lab/pySvdGenerator"
+Issues = "https://github.com/h2lab/pySvdGenerator/issues"
+
+[project.scripts]
+pysvdgen = "pySvdGenerator.cli:run"
+
+[project.optional-dependencies]
+dev = [
+    "black",
+    "flake8",
+    "flake8-docstrings",
+    "mypy",
+    "pytest",
+]
+
+[tool.setuptools_scm]
+
+[tool.black]
+line-length = 100
+diff = true
+check = true
+target-version = ["py312"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.mypy]
+python_version = "3.12"
+strict = true
+files = ["src"]
+
+[[tool.mypy.overrides]]
+module = ["pandas", "pandas.*", "tabula", "tabula.*", "ollama"]
+ignore_missing_imports = true
