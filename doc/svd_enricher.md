@@ -48,6 +48,10 @@ Everything else is reported rather than silently dropped:
 | `unmatched_svd` | Device tree peripherals left without registers |
 | `unused_sources` | Manual peripherals absent from the device tree |
 
+A peripheral already holding a `<registers>` section and not covered by the
+given dictionaries is left untouched and is not reported as unmatched, which
+is what makes the chapter by chapter completion of a file possible.
+
 ## Generated XML
 
 For every paired peripheral a `<registers>` section is appended, after the

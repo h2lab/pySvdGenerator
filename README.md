@@ -39,12 +39,25 @@ Each module is documented in [doc/](doc/README.md).
 pysvdgen -k /path/to/linux -d imx8mm -p IMX8MDQLQRM.pdf -o imx8mm.svd
 ```
 
+An existing SVD file can also be completed, chapter after chapter. In that
+mode `--kernel` and `--dtsi` must not be given, and the file is updated in
+place unless `--output` is set:
+
+```console
+pysvdgen -s imx8mm.svd -p IMX8MDQLQRM.pdf -c Timers
+pysvdgen -s imx8mm.svd -p IMX8MDQLQRM.pdf -c Connectivity
+```
+
+Peripherals already holding registers are left untouched by the following
+runs.
+
 | Option | Description |
 | --- | --- |
-| `-k`, `--kernel` | Linux kernel sources |
-| `-d`, `--dtsi` | DTSI name, without extension |
+| `-k`, `--kernel` | Linux kernel sources, required unless `--svd` is given |
+| `-d`, `--dtsi` | DTSI name, without extension, required unless `--svd` is given |
+| `-s`, `--svd` | existing SVD file to complete, instead of generating one |
 | `-p`, `--pdf` | reference manual PDF |
-| `-o`, `--output` | SVD file to write |
+| `-o`, `--output` | SVD file to write, optional with `--svd` |
 | `-w`, `--workspace` | working directory, kept on exit; a temporary one is created and removed when omitted |
 | `-c`, `--chapter` | only process the chapters whose name contains this text (repeatable) |
 | `--model`, `--ollama-host` | select the ollama model and server |
