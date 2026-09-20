@@ -29,7 +29,9 @@ exclusive.
 | `-o`, `--output` | SVD file to write, defaults to updating `--svd` in place |
 | `-w`, `--workspace` | working directory, kept on exit |
 | `-c`, `--chapter` | only process the chapters whose name contains this text, repeatable |
-| `--model` | ollama model used for extraction, default `qwen2.5-coder:7b`, falling back to `llama3.2` |
+| `--peripheral NAME` | only update the named peripheral, repeatable and case-insensitive |
+| `--allow-new` | add the selected peripheral when it is missing from the SVD; requires `--peripheral` |
+| `--llm-model NAME` | explicitly select the ollama model used for extraction, for example `llama3.2`; `--model` is an alias. Defaults to `qwen2.5-coder:7b`, falling back to `llama3.2` |
 | `--ollama-host` | base URL of the ollama server, default `http://localhost:11434` |
 | `--no-llm` | do not query the agent, the extraction is then degraded |
 | `--vendor` | vendor name written in the SVD |
@@ -62,6 +64,24 @@ pysvdgen -s imx8mm.svd -p rm.pdf -c Connectivity
 A peripheral already holding a `<registers>` section and not covered by the
 chapters of the current run is left untouched, and is not listed among the
 peripherals without register description.
+
+To update only one peripheral from a chapter, name it explicitly. The match
+is case-insensitive and the option can be repeated:
+
+```console
+pysvdgen -s imx8mm.svd -p rm.pdf -c Timer --peripheral GPT1
+```
+
+If `GPT1` is described by the chapter but is absent from the SVD, add it with
+`--allow-new`:
+
+```console
+pysvdgen -s imx8mm.svd -p rm.pdf \
+  -c Timer --peripheral GPT1 --allow-new
+```
+
+Without `--allow-new`, missing named peripherals remain in the report as
+unused manual sources and are not created.
 
 ## Exit codes
 

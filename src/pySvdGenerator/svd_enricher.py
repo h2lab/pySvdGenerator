@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 import xml.etree.ElementTree as ET
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -295,6 +296,30 @@ def _enrich_peripheral(peripheral: ET.Element, source: _Source) -> PeripheralMat
     return match
 
 
+def _new_peripheral(source: _Source) -> ET.Element | None:
+    """Build the SVD shell for a peripheral found only in the manual."""
+    if source.base_address is None:
+        return None
+
+    addresses = [
+        address
+        for body in source.registers.values()
+        if (address := _address(source.base_address, body)) is not None
+    ]
+    max_offset = max((address - source.base_address for address in addresses), default=0)
+    block_size = max(0x1000, ((max_offset + 4 + 0xFFF) // 0x1000) * 0x1000)
+
+    peripheral = ET.Element("peripheral")
+    _sub(peripheral, "name", source.name)
+    _sub(peripheral, "groupName", re.sub(r"\d+$", "", source.name) or source.name)
+    _sub(peripheral, "baseAddress", f"0x{source.base_address:X}")
+    block = ET.SubElement(peripheral, "addressBlock")
+    _sub(block, "offset", "0x0")
+    _sub(block, "size", f"0x{block_size:X}")
+    _sub(block, "usage", "registers")
+    return peripheral
+
+
 # --------------------------------------------------------------------------
 # public API
 # --------------------------------------------------------------------------
@@ -304,6 +329,9 @@ def enrich_svd(
     svd: Path | str,
     registers: Dictionary | Sequence[Dictionary | Path | str] | Path | str,
     output: Path | str | None = None,
+    *,
+    peripherals: Sequence[str] | None = None,
+    allow_new: bool = False,
 ) -> EnrichmentReport:
     """Inject the manual register descriptions into an SVD file.
 
@@ -312,6 +340,9 @@ def enrich_svd(
         :func:`pySvdGenerator.extract_registers`, a sequence of such
         dictionaries, or the path of a JSON file or directory holding them.
     :param output: destination file, defaults to updating ``svd`` in place.
+    :param peripherals: names of the SVD and manual peripherals to process;
+        when omitted, all peripherals are processed.
+    :param allow_new: append selected manual peripherals missing from the SVD.
     :return: a report describing what has been merged.
 
     Peripherals already holding a ``<registers>`` section and not covered by
@@ -325,12 +356,20 @@ def enrich_svd(
     tree = ET.parse(source_path)
     root = tree.getroot()
     sources = _sources(load_dictionaries(registers))
-    peripherals = root.findall("./peripherals/peripheral")
-    pairs = _pair(peripherals, sources)
+    wanted = {name.upper() for name in peripherals} if peripherals else None
+    if wanted is not None:
+        sources = [item for item in sources if item.name in wanted]
+    all_peripherals = root.findall("./peripherals/peripheral")
+    selected_peripherals = (
+        [item for item in all_peripherals if _text(item.find("name")).upper() in wanted]
+        if wanted is not None
+        else all_peripherals
+    )
+    pairs = _pair(selected_peripherals, sources)
     used: set[str] = set()
 
     report = EnrichmentReport(output=Path(output) if output else source_path)
-    for peripheral in peripherals:
+    for peripheral in selected_peripherals:
         candidate = pairs.get(id(peripheral))
         documented = peripheral.find("registers") is not None
         if candidate is None:
@@ -343,6 +382,20 @@ def enrich_svd(
             report.matches.append(match)
         elif not documented:
             report.unmatched_svd.append(match.peripheral)
+
+    parent = root.find("./peripherals")
+    if parent is not None and allow_new:
+        for source in sources:
+            if source.key in used:
+                continue
+            peripheral = _new_peripheral(source)
+            if peripheral is None:
+                continue
+            parent.append(peripheral)
+            match = _enrich_peripheral(peripheral, source)
+            used.add(source.key)
+            if match.registers:
+                report.matches.append(match)
 
     report.unused_sources = [item.name for item in sources if item.key not in used]
 

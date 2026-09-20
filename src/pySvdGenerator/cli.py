@@ -73,6 +73,8 @@ class Options:
     :param output: SVD file to write.
     :param workspace: working directory kept on exit, None for a temporary one.
     :param chapters: chapter name filters, empty for the whole manual.
+    :param peripherals: peripheral names to update, empty for all peripherals.
+    :param allow_new: add selected peripherals missing from the SVD.
     :param model: ollama model used by the extraction agent.
     :param host: base URL of the ollama server, None for the default one.
     :param use_llm: query the ollama agent, enabled by default.
@@ -87,6 +89,8 @@ class Options:
     output: Path
     workspace: Path | None
     chapters: list[str]
+    peripherals: list[str]
+    allow_new: bool
     model: str
     host: str | None
     use_llm: bool
@@ -104,6 +108,8 @@ class Options:
             output=args.output or args.svd,
             workspace=args.workspace,
             chapters=args.chapters,
+            peripherals=args.peripherals,
+            allow_new=args.allow_new,
             model=args.model,
             host=args.ollama_host,
             use_llm=not args.no_llm,
@@ -154,7 +160,26 @@ def build_parser() -> argparse.ArgumentParser:
         metavar="NAME",
         help="only process the chapters whose name contains NAME (repeatable)",
     )
-    parser.add_argument("--model", default=DEFAULT_MODEL, help="ollama model used for extraction")
+    parser.add_argument(
+        "--peripheral",
+        dest="peripherals",
+        action="append",
+        default=[],
+        metavar="NAME",
+        help="only update the named peripheral (repeatable, case-insensitive)",
+    )
+    parser.add_argument(
+        "--allow-new",
+        action="store_true",
+        help="add a selected peripheral when it is missing from the SVD",
+    )
+    parser.add_argument(
+        "--model",
+        "--llm-model",
+        dest="model",
+        default=DEFAULT_MODEL,
+        help="ollama model used for extraction",
+    )
     parser.add_argument("--ollama-host", default=None, help="base URL of the ollama server")
     parser.add_argument(
         "--no-llm",
@@ -262,13 +287,14 @@ def _split(pdf: Path, workspace: Path, chapters: Sequence[Chapter], console: Con
     """Split the selected chapters into the workspace and return their paths."""
     with _progress(console) as progress:
         task = progress.add_task("Splitting", total=len(chapters))
-        files: list[Path] = []
-        for chapter in chapters:
-            progress.update(task, description=f"Splitting {chapter.title}")
-            files.extend(
-                split_chapters(pdf, workspace / "chapters", overwrite=False, select=[chapter.title])
-            )
-            progress.advance(task)
+        progress.update(task, description="Splitting selected chapters")
+        files = split_chapters(
+            pdf,
+            workspace / "chapters",
+            overwrite=False,
+            select=[chapter.filename for chapter in chapters],
+        )
+        progress.advance(task, len(chapters))
     console.print(f"{len(files)} chapter(s) split")
     return files
 
@@ -299,6 +325,24 @@ def _extract(
     return dictionaries
 
 
+def _filter_peripherals(
+    dictionaries: Sequence[dict[str, Any]], names: Sequence[str]
+) -> list[dict[str, Any]]:
+    """Keep only the named peripheral descriptions from chapter dictionaries."""
+    wanted = {name.upper() for name in names}
+    return [
+        dictionary
+        | {
+            "peripherals": {
+                name: body
+                for name, body in dictionary.get("peripherals", {}).items()
+                if str(name).upper() in wanted
+            }
+        }
+        for dictionary in dictionaries
+    ]
+
+
 def _check(parser: argparse.ArgumentParser, args: argparse.Namespace) -> None:
     """Reject the argument combinations the pipeline cannot honour."""
     if args.svd:
@@ -308,6 +352,8 @@ def _check(parser: argparse.ArgumentParser, args: argparse.Namespace) -> None:
         parser.error("--kernel and --dtsi are required, unless --svd is given")
     if not args.output and not args.svd:
         parser.error("--output is required, unless --svd is updated in place")
+    if args.allow_new and not args.peripherals:
+        parser.error("--allow-new requires --peripheral")
 
 
 def run(argv: Sequence[str] | None = None) -> int:
@@ -376,8 +422,17 @@ def run(argv: Sequence[str] | None = None) -> int:
             console.rule("[bold]3/4 Register extraction")
             dictionaries = _extract(files, workspace, options, console)
 
-            console.rule("[bold]4/4 SVD enrichment")
-            report = enrich_svd(svd, dictionaries, options.output)
+            if options.peripherals:
+                dictionaries = _filter_peripherals(dictionaries, options.peripherals)
+
+            console.rule("[bold]4/4 SVD enrichment[/bold]")
+            report = enrich_svd(
+                svd,
+                dictionaries,
+                options.output,
+                peripherals=options.peripherals or None,
+                allow_new=options.allow_new,
+            )
     except Exception as error:
         console.print(Panel(str(error), title="Failed", border_style="red"))
         if options.verbose:
