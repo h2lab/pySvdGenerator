@@ -388,11 +388,11 @@ def enrich_svd(
         for source in sources:
             if source.key in used:
                 continue
-            peripheral = _new_peripheral(source)
-            if peripheral is None:
+            new_peripheral = _new_peripheral(source)
+            if new_peripheral is None:
                 continue
-            parent.append(peripheral)
-            match = _enrich_peripheral(peripheral, source)
+            parent.append(new_peripheral)
+            match = _enrich_peripheral(new_peripheral, source)
             used.add(source.key)
             if match.registers:
                 report.matches.append(match)
